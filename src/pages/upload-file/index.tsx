@@ -41,6 +41,7 @@ interface UploadTask {
     | 'error';
   uploadedChunks: number[];
   totalChunks: number;
+  chunkSize?: number;
   uploadUrls?: string[];
   error?: string;
   uploadedBytes: number;
@@ -52,9 +53,12 @@ const ChunkedUploadComponent: React.FC = () => {
   const tasksRef = useRef(tasks);
   const abortControllersRef = useRef<Map<string, AbortController>>(new Map());
   const speedIntervalRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
+  const progressThrottleRef = useRef<Map<string, { ts: number; pct: number }>>(
+    new Map(),
+  );
 
   const CHUNK_SIZE = 5 * 1024 * 1024;
-  const CONCURRENT_LIMIT = 3; // 并发上传数量
+  const CONCURRENT_LIMIT = 6; // 并发上传数量
 
   const log = (step: string, data?: unknown) => {
     const timestamp = new Date().toLocaleTimeString();
@@ -161,32 +165,49 @@ const ChunkedUploadComponent: React.FC = () => {
     return result;
   };
 
-  const extractUploadUrls = (payload: unknown): string[] => {
-    if (!payload) return [];
-    if (Array.isArray(payload)) return payload;
-    if (typeof payload !== 'object') return [];
-    const payloadRecord = payload as Record<string, unknown>;
-    const candidateKeys = [
-      'uploadUrls',
-      'urlList',
-      'urls',
-      'preSignedUrls',
-      'preSignedUrlList',
-      'presignedUrls',
-      'presignedUrlList',
-      'uploadUrlList',
-    ];
-    for (const key of candidateKeys) {
-      const value = payloadRecord[key];
-      if (Array.isArray(value)) {
-        return value;
+  const extractInitInfo = (
+    payload: unknown,
+  ): { uploadUrls: string[]; uploadedParts: number[]; chunkSize?: number } => {
+    const uploadUrls: string[] = [];
+    const uploadedParts: number[] = [];
+    let chunkSize: number | undefined;
+    if (payload && typeof payload === 'object') {
+      const rec = payload as Record<string, any>;
+      const urlKeys = [
+        'uploadUrls',
+        'urlList',
+        'urls',
+        'preSignedUrls',
+        'preSignedUrlList',
+        'presignedUrls',
+        'presignedUrlList',
+        'uploadUrlList',
+      ];
+      for (const k of urlKeys) {
+        const v = rec[k];
+        if (Array.isArray(v)) {
+          v.forEach((it: any) =>
+            uploadUrls.push(
+              typeof it === 'string' ? it : it?.url || it?.uploadUrl,
+            ),
+          );
+          break;
+        }
       }
+      const partsKeys = ['uploadedParts', 'uploaded', 'uploaded_chunks'];
+      for (const k of partsKeys) {
+        const v = rec[k];
+        if (Array.isArray(v)) {
+          v.forEach((n: any) => {
+            const idx = parseInt(n, 10);
+            if (!Number.isNaN(idx)) uploadedParts.push(idx);
+          });
+          break;
+        }
+      }
+      chunkSize = rec.chunkSize ?? rec.data?.chunkSize;
     }
-    const nestedData = payloadRecord.data;
-    if (Array.isArray(nestedData)) {
-      return nestedData;
-    }
-    return [];
+    return { uploadUrls, uploadedParts, chunkSize };
   };
 
   const uploadChunk = async (
@@ -195,19 +216,14 @@ const ChunkedUploadComponent: React.FC = () => {
     uploadUrl: string,
     signal: AbortSignal,
     md5: string,
+    chunkSize: number,
   ): Promise<{ success: boolean; bytes: number }> => {
-    const start = chunkIndex * CHUNK_SIZE;
-    const end = Math.min(start + CHUNK_SIZE, file.size);
+    const start = chunkIndex * chunkSize;
+    const end = Math.min(start + chunkSize, file.size);
     const chunk = file.slice(start, end);
     const chunkBytes = chunk.size;
 
-    log(`📦 上传分片 ${chunkIndex + 1} 到 MinIO`, {
-      chunkIndex,
-      size: chunk.size,
-      start,
-      end,
-      uploadUrl: uploadUrl.substring(0, 100) + '...',
-    });
+    void 0;
 
     try {
       const response = await fetch(uploadUrl, {
@@ -220,7 +236,6 @@ const ChunkedUploadComponent: React.FC = () => {
       });
 
       if (response.ok) {
-        log(`✅ 分片 ${chunkIndex + 1} 上传到MinIO成功`);
         return { success: true, bytes: chunkBytes };
       }
 
@@ -298,12 +313,14 @@ const ChunkedUploadComponent: React.FC = () => {
 
       if (timeDiff > 0) {
         const speed = bytesDiff / (1024 * 1024) / timeDiff; // MB/s
-        updateTask(md5, { speed: speed > 0 ? speed : 0 });
+        if (speed > 0 && isFinite(speed)) {
+          updateTask(md5, { speed });
+        }
       }
 
       lastUploadedBytes = task.uploadedBytes;
       lastTime = now;
-    }, 1000); // 每秒更新一次速度
+    }, 1000);
 
     speedIntervalRef.current.set(md5, interval);
   };
@@ -357,7 +374,19 @@ const ChunkedUploadComponent: React.FC = () => {
         if (!initResult) {
           throw new Error('初始化上传失败,未获取到返回数据');
         }
-        uploadUrls = extractUploadUrls(initResult);
+        const {
+          uploadUrls: urls,
+          uploadedParts,
+          chunkSize,
+        } = extractInitInfo(initResult);
+        if (chunkSize) {
+          const total = Math.ceil(initialTask.file.size / chunkSize);
+          updateTask(md5, { chunkSize, totalChunks: total });
+        }
+        if (uploadedParts && uploadedParts.length) {
+          uploadedParts.forEach((p) => uploadedChunkSet.add(p));
+        }
+        uploadUrls = urls;
         if (!Array.isArray(uploadUrls) || uploadUrls.length === 0) {
           log('⚠️ 未获取到上传地址列表，尝试直接合并', { md5 });
           const mergeResult = await mergeChunks(md5);
@@ -398,10 +427,14 @@ const ChunkedUploadComponent: React.FC = () => {
         throw new Error('未获取到上传地址列表');
       }
 
-      if (uploadUrls.length !== initialTask.totalChunks) {
+      const expectedChunks = Math.ceil(
+        initialTask.file.size /
+          (tasksRef.current.get(md5)?.chunkSize || CHUNK_SIZE),
+      );
+      if (uploadUrls.length !== expectedChunks) {
         log('⚠️ 上传URL数量与分片数不匹配', {
           urlCount: uploadUrls.length,
-          chunkCount: initialTask.totalChunks,
+          chunkCount: expectedChunks,
         });
       }
 
@@ -413,14 +446,20 @@ const ChunkedUploadComponent: React.FC = () => {
       // 并发上传实现
       log(`步骤3: 开始并发上传分片到MinIO (并发数: ${CONCURRENT_LIMIT})`);
 
+      const effectiveChunkSize =
+        tasksRef.current.get(md5)?.chunkSize || CHUNK_SIZE;
+      const totalChunksLocal = Math.ceil(
+        initialTask.file.size / effectiveChunkSize,
+      );
+
       const pendingChunks: number[] = [];
-      for (let i = 0; i < initialTask.totalChunks; i++) {
+      for (let i = 0; i < totalChunksLocal; i++) {
         if (!uploadedChunkSet.has(i)) {
           pendingChunks.push(i);
         }
       }
 
-      log(`待上传分片: ${pendingChunks.length}/${initialTask.totalChunks}`);
+      log(`待上传分片: ${pendingChunks.length}/${totalChunksLocal}`);
 
       // 并发上传控制
       const uploadQueue = [...pendingChunks];
@@ -452,7 +491,9 @@ const ChunkedUploadComponent: React.FC = () => {
           const uploadUrl =
             partUrlMap.get(chunkIndex) || uploadUrls[chunkIndex];
           if (!uploadUrl) {
-            throw new Error(`分片 ${chunkIndex + 1} 的上传地址不存在`);
+            // 视为已上传（后端仅返回未上传分片的URL）
+            uploadedChunkSet.add(chunkIndex);
+            continue;
           }
 
           const uploadPromise = uploadChunk(
@@ -461,33 +502,40 @@ const ChunkedUploadComponent: React.FC = () => {
             uploadUrl,
             abortController.signal,
             md5,
+            currentTask.chunkSize || CHUNK_SIZE,
           )
             .then(({ success, bytes }) => {
               if (success) {
                 uploadedChunkSet.add(chunkIndex);
 
-                // 更新上传进度和字节数
                 const currentTask = tasksRef.current.get(md5);
                 if (currentTask) {
                   const newUploadedBytes =
                     (currentTask.uploadedBytes || 0) + bytes;
                   const progress = Math.round(
-                    (uploadedChunkSet.size / currentTask.totalChunks) * 100,
+                    (uploadedChunkSet.size / totalChunksLocal) * 100,
                   );
-
-                  updateTask(md5, (task) => ({
-                    ...task,
-                    uploadedChunks: Array.from(uploadedChunkSet).sort(
-                      (a, b) => a - b,
-                    ),
-                    progress,
-                    uploadedBytes: newUploadedBytes,
-                  }));
-
-                  if (progress % 10 === 0 || progress === 100) {
-                    log(`📊 上传进度: ${progress}%`, {
-                      uploadedChunks: uploadedChunkSet.size,
-                      totalChunks: currentTask.totalChunks,
+                  const now = performance.now();
+                  const prev = progressThrottleRef.current.get(md5) || {
+                    ts: 0,
+                    pct: 0,
+                  };
+                  if (
+                    progress === 100 ||
+                    progress - prev.pct >= 5 ||
+                    now - prev.ts >= 200
+                  ) {
+                    updateTask(md5, (task) => ({
+                      ...task,
+                      uploadedChunks: Array.from(uploadedChunkSet).sort(
+                        (a, b) => a - b,
+                      ),
+                      progress,
+                      uploadedBytes: newUploadedBytes,
+                    }));
+                    progressThrottleRef.current.set(md5, {
+                      ts: now,
+                      pct: progress,
                     });
                   }
                 }
@@ -762,14 +810,14 @@ const ChunkedUploadComponent: React.FC = () => {
                             '正在计算文件MD5...'}
                           {task.status === 'waiting' && '等待上传...'}
                           {task.status === 'uploading' &&
-                            `上传中 ${task.progress}% (${task.uploadedChunks.length}/${task.totalChunks} 分片)`}
+                            `上传中 ${task.progress}%`}
                           {task.status === 'paused' &&
-                            `已暂停 ${task.progress}% (${task.uploadedChunks.length}/${task.totalChunks} 分片)`}
+                            `已暂停 ${task.progress}%`}
                           {task.status === 'success' && '上传完成'}
                           {task.status === 'error' && `上传失败: ${task.error}`}
                         </Text>
                         <Text type="secondary" style={{ fontSize: 12 }}>
-                          速度: {formatSpeed(task.speed)}
+                          下载速度: {formatSpeed(task.speed)}
                         </Text>
                       </div>
                     </div>
