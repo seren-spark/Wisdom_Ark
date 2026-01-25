@@ -1,0 +1,79 @@
+/**
+ * 分页编辑器样式（虚拟列表优化版）
+ */
+
+/* 页面分隔标记 - 不可见 */
+.page-break-marker {
+  display: block;
+  height: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* 页面占位符 - 轻量的 CSS 占位 */
+.page-placeholder {
+  display: block;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  pointer-events: none;
+
+  /* 关键优化：使用 content-visibility 跳过渲染 */
+  content-visibility: auto;
+  contain: strict;
+
+  /* 提供固定高度占位，防止滚动条跳动 */
+  /* height 和 min-height 通过内联 style 设置 */
+}
+
+/* 调试模式：显示页面分隔线和占位符 */
+.page-break-marker[data-debug='true'] {
+  height: 2px;
+  background: linear-gradient(to right, #3b82f6 50%, transparent 50%);
+  background-size: 10px 2px;
+  opacity: 0.3;
+  margin: 1rem 0;
+  position: relative;
+}
+
+.page-break-marker[data-debug='true']::after {
+  content: 'Page ' attr(data-page-num);
+  position: absolute;
+  right: 0;
+  top: -1.5rem;
+  font-size: 0.75rem;
+  color: #3b82f6;
+  background: white;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.25rem;
+  border: 1px solid #3b82f6;
+}
+
+.page-placeholder[data-debug='true'] {
+  background: repeating-linear-gradient(
+    45deg,
+    #f3f4f6,
+    #f3f4f6 10px,
+    #e5e7eb 10px,
+    #e5e7eb 20px
+  );
+  opacity: 0.5;
+  border: 1px dashed #9ca3af;
+  position: relative;
+}
+
+.page-placeholder[data-debug='true']::after {
+  content: '📦 占位符 Page ' attr(data-page-num) ' (高度: '
+    attr(data-placeholder-height) 'px)';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 0.875rem;
+  color: #6b7280;
+  white-space: nowrap;
+}

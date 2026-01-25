@@ -36,6 +36,7 @@ import marked from '@/utils/marked';
 // import { Markdown } from 'tiptap-markdown';
 import BlockAttributes from '../extensions/BlockAttributes';
 import VirtualScroll from '../extensions/VirtualScroll'; // ✅ Decoration + content-visibility 方案
+import { PageBreak } from '../extensions/PageBreak'; // 🔥 分页加载方案的页面分隔节点
 // import VirtualRenderer from '../extensions/VirtualRenderer'; // ❌ 已弃用
 // import VirtualRendererSimple from '../extensions/VirtualRendererSimple'; // ❌ 已弃用
 // you can also register individual languages
@@ -165,6 +166,9 @@ const editor = new Editor({
     // ✅ BlockAttributes（用于 blockId 和目录）
     BlockAttributes,
 
+    // 🔥 分页加载方案的页面分隔节点
+    PageBreak,
+
     // 🔥 混合虚拟化方案：VirtualScroll + content-visibility
     // VirtualScroll 负责 Decoration 标记和滚动计算
     // CSS content-visibility 负责浏览器级渲染优化
@@ -186,6 +190,15 @@ const editor = new Editor({
     TableOfContents.configure({
       getIndex: getHierarchicalIndexes,
       onUpdate(content) {
+        // 🔥 检查是否在分页模式，如果是则跳过更新（分页模式有自己的 TOC 管理）
+        const state = store.getState();
+        const isPagedMode = (window as any).__PAGED_MODE_ACTIVE__ || false;
+
+        if (isPagedMode) {
+          console.log('[TableOfContents] 🛑 跳过更新，当前在分页模式');
+          return;
+        }
+
         // 修改 tocItems 数据
         // store.dispatch(setTocItems(content));
         // const serializableContent = content.map((item) => {
