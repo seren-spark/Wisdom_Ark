@@ -484,6 +484,8 @@ export const chatRaw = async (
           temperature,
         });
         const content = res.choices?.[0]?.message?.content || '';
+        console.log(content, 'chatRaw');
+
         aiServiceManager.markServiceSuccess(svc.id);
         onComplete?.(content);
         return content;

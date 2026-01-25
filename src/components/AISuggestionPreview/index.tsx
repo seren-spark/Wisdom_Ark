@@ -2,6 +2,9 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Space, Tooltip } from 'antd';
 import { CheckOutlined, CloseOutlined, EditOutlined } from '@ant-design/icons';
 import AISuggestionBus, { type AISuggestion } from '@/utils/AISuggestionBus';
+import { mockMarked } from '@/utils/mdRendering';
+import marked from '@/utils/marked';
+import './index.scss';
 
 interface AISuggestionPreviewProps {
   editor: any;
@@ -14,6 +17,7 @@ export default React.memo(function AISuggestionPreview({
   const [suggestion, setSuggestion] = useState<AISuggestion | null>(null);
   const [editable, setEditable] = useState(false);
   const [draft, setDraft] = useState('');
+  const [renderedHtml, setRenderedHtml] = useState('');
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -21,6 +25,15 @@ export default React.memo(function AISuggestionPreview({
       setSuggestion(s);
       setEditable(false);
       setDraft(s?.text ?? '');
+
+      // 自动渲染 Markdown
+      if (s?.text) {
+        mockMarked.parse(s.text).then((html) => {
+          setRenderedHtml(html);
+        });
+      } else {
+        setRenderedHtml('');
+      }
     });
   }, [bus]);
 
@@ -46,6 +59,10 @@ export default React.memo(function AISuggestionPreview({
   const handleAccept = () => {
     if (!suggestion) return;
     const textToInsert = editable ? draft : suggestion.text;
+
+    // 🔥 将 Markdown 文本转换为 HTML，让 Tiptap 正确解析
+    const htmlContent = String(marked.parse(textToInsert));
+
     if (
       suggestion.mode === 'insert' &&
       typeof suggestion.position === 'number'
@@ -53,17 +70,17 @@ export default React.memo(function AISuggestionPreview({
       editor
         .chain()
         .focus()
-        .insertContentAt(suggestion.position, textToInsert)
+        .insertContentAt(suggestion.position, htmlContent)
         .run();
     } else if (suggestion.mode === 'replace' && suggestion.range) {
       editor
         .chain()
         .focus()
         .deleteRange({ from: suggestion.range.from, to: suggestion.range.to })
-        .insertContentAt(suggestion.range.from, textToInsert)
+        .insertContentAt(suggestion.range.from, htmlContent)
         .run();
     } else if (suggestion.mode === 'replace_all') {
-      editor.commands.setContent(textToInsert);
+      editor.commands.setContent(htmlContent);
     }
     bus.clear();
   };
@@ -71,44 +88,20 @@ export default React.memo(function AISuggestionPreview({
   if (!suggestion) return null;
 
   return (
-    <div
-      style={{
-        position: 'sticky',
-        bottom: 0,
-        background: '#fff',
-        borderTop: '1px solid #f0f0f0',
-        padding: '8px 12px',
-        zIndex: 5,
-        display: 'flex',
-        alignItems: 'center',
-        gap: 8,
-      }}
-    >
-      <span style={{ color: '#1677ff', fontWeight: 500 }}>AI建议</span>
+    <div className="ai-suggestion-preview">
+      <span className="ai-suggestion-preview__label">AI建议</span>
       {editable ? (
         <textarea
           ref={inputRef}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          style={{
-            flex: 1,
-            minHeight: 60,
-            border: '1px solid #d9d9d9',
-            borderRadius: 6,
-            padding: 8,
-          }}
+          className="ai-suggestion-preview__textarea"
         />
       ) : (
         <div
-          style={{
-            flex: 1,
-            maxHeight: 160,
-            overflowY: 'auto',
-            whiteSpace: 'pre-wrap',
-          }}
-        >
-          {suggestion.text}
-        </div>
+          className="ai-suggestion-preview__content"
+          dangerouslySetInnerHTML={{ __html: renderedHtml }}
+        />
       )}
       <Space>
         <Tooltip

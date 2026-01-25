@@ -225,7 +225,7 @@ function findScrollContainer(
     let el: HTMLElement | null = editorDom;
     while (el) {
       if (el.matches(selector)) {
-        console.log('[VirtualScroll] 找到指定的滚动容器:', selector, el);
+        // console.log('[VirtualScroll] 找到指定的滚动容器:', selector, el);
         return el;
       }
       el = el.parentElement;
@@ -234,11 +234,11 @@ function findScrollContainer(
     // 如果向上查找失败，尝试全局查找
     const container = document.querySelector(selector) as HTMLElement;
     if (container) {
-      console.log(
-        '[VirtualScroll] 使用全局查找的滚动容器:',
-        selector,
-        container,
-      );
+      // console.log(
+      //   '[VirtualScroll] 使用全局查找的滚动容器:',
+      //   selector,
+      //   container,
+      // );
       return container;
     }
 
@@ -261,11 +261,11 @@ function findScrollContainer(
       }
 
       candidates.push({ el, distance });
-      console.log(
-        `[VirtualScroll] 找到候选滚动容器 (距离 ${distance}):`,
-        el.className || el.tagName,
-        `scrollHeight: ${el.scrollHeight}, clientHeight: ${el.clientHeight}`,
-      );
+      // console.log(
+      //   `[VirtualScroll] 找到候选滚动容器 (距离 ${distance}):`,
+      //   el.className || el.tagName,
+      //   `scrollHeight: ${el.scrollHeight}, clientHeight: ${el.clientHeight}`,
+      // );
     }
     el = el.parentElement;
   }
@@ -612,9 +612,9 @@ export default Extension.create({
 
             // 🔥 根据配置控制日志输出
             if (enableDebugLog) {
-              console.log(
-                `[VirtualScroll] 📊 块索引: ${visibleBlockRange.startIndex}-${visibleBlockRange.endIndex} | 可见: ${visibleCount} | 隐藏: ${hiddenCount} | 总块数: ${blocks.length} | 总高度: ${heightCache.getTotalHeight().toFixed(0)}px`,
-              );
+              // console.log(
+              //   `[VirtualScroll] 📊 块索引: ${visibleBlockRange.startIndex}-${visibleBlockRange.endIndex} | 可见: ${visibleCount} | 隐藏: ${hiddenCount} | 总块数: ${blocks.length} | 总高度: ${heightCache.getTotalHeight().toFixed(0)}px`,
+              // );
 
               // 🔥 详细调试信息：显示块状态表格
               // if (debugBlocks.length > 0) {

@@ -16,7 +16,7 @@ const persistConfig = {
 // 自动构建 reducers 对象
 const buildReducers = () => {
   const reducers: Record<string, any> = {};
-  console.log(sliceModules);
+  // console.log(sliceModules);
 
   Object.entries(sliceModules).forEach(([filePath, module]) => {
     // 从文件路径提取模块名
@@ -24,7 +24,7 @@ const buildReducers = () => {
       filePath.split('/').pop()?.replace('Slice.ts', '') || 'unknown';
     // 支持自定义 slice 名称
     const sliceName = module.sliceName || fileName;
-    console.log(fileName, sliceName);
+    // console.log(fileName, sliceName);
 
     if (module.default) {
       reducers[sliceName] = module.default;

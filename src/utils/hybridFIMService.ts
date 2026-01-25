@@ -204,13 +204,15 @@ export class HybridFIMService {
       2. 保持原文逻辑结构
       3. 确保内容自然流畅
       4. 不要重复已有内容
-      5.使用markdown格式输出
+      5. 使用markdown格式输出
+      6. 用来直接插入文本中,不要包含原文
+      7. 不要语义不连贯 可直接衔接原文
       请返回完整的扩写后文本。
       `;
 
     try {
       const response = await chatRaw([{ role: 'user', content: prompt }]);
-      console.log(response, 'response');
+      console.log(response, '智能扩写response');
 
       return response;
     } catch (error) {

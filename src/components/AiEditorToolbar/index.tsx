@@ -110,13 +110,14 @@ export default function AIEditorToolbar({ editor }: AIEditorToolbarProps) {
     setLoading(true);
     try {
       const fullText = editor.getText();
-      const result = await fimService.expandText(fullText, 300);
+      const result = await fimService.expandText(fullText);
       AISuggestionBus.getInstance().show({
         id: `${Date.now()}`,
         text: result,
         mode: 'replace_all',
       });
       message.success('已生成扩写建议，按 Tab/Enter 确认，Esc 取消');
+      console.log('扩写result', result);
     } catch (error) {
       message.error('智能扩写失败，请重试');
     } finally {
@@ -128,12 +129,10 @@ export default function AIEditorToolbar({ editor }: AIEditorToolbarProps) {
   const handleSelectedCorrect = useCallback(async () => {
     const { from, to } = editor.state.selection;
     const selectedText = editor.state.doc.textBetween(from, to);
-
     if (!selectedText.trim()) {
       message.warning('请先选择要检查的内容');
       return;
     }
-
     setLoading(true);
     try {
       const result = await fimService.correctText(selectedText);

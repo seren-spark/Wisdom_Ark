@@ -9,6 +9,9 @@ import {
   message,
   Badge,
   Tooltip,
+  Switch,
+  Select,
+  Card,
 } from 'antd';
 import {
   MenuOutlined,
@@ -65,7 +68,35 @@ const TiptapEditor = () => {
   );
   const [ragReady, setRagReady] = useState(false);
   const [ragLoading, setRagLoading] = useState(false);
-  const [ragStats, setRagStats] = useState<any>(null); // 现有的代码保持不变
+  const [ragStats, setRagStats] = useState<any>(null);
+
+  // 🆕 历史文档相关状态
+  const [includeHistory, setIncludeHistory] = useState(false);
+  const [selectedArticles, setSelectedArticles] = useState<string[]>([]);
+  const [userArticles, setUserArticles] = useState<
+    { id: string; title: string; content: string }[]
+  >([]);
+
+  // 🆕 加载用户历史文章（从 localStorage 或 API）
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('wisdom_ark_history_docs');
+      if (raw) {
+        const docs = JSON.parse(raw);
+        if (Array.isArray(docs)) {
+          setUserArticles(
+            docs.map((doc: any) => ({
+              id: doc.id || `doc-${Date.now()}`,
+              title: doc.title || '未命名文章',
+              content: doc.content || '',
+            })),
+          );
+        }
+      }
+    } catch (error) {
+      console.warn('加载历史文章失败', error);
+    }
+  }, []);
   const handleInsertLink = () => {
     if (!editor) return;
 
@@ -101,17 +132,15 @@ const TiptapEditor = () => {
 
     setIsLinkBubbleVisible(false);
   };
-  // =====================🔥 构建RAG索引==============================
+  // =====================构建RAG索引==============================
   const handleBuildRAG = async () => {
     if (!editor) {
       message.warning('编辑器未初始化');
       return;
     }
-
     const content = editor.getText();
-
     if (content.length < 500) {
-      message.warning('文档太短（少于500字），不建议使用RAG');
+      message.warning('文档太短(少于500字),不建议使用RAG');
       return;
     }
 
@@ -119,7 +148,18 @@ const TiptapEditor = () => {
     const loadingMessage = message.loading('正在构建RAG索引...', 0);
 
     try {
-      await ragService.buildIndex(content);
+      // 🆕 支持历史文档
+      const historyDocs =
+        includeHistory && selectedArticles.length > 0
+          ? userArticles.filter((article) =>
+              selectedArticles.includes(article.id),
+            )
+          : [];
+
+      await ragService.buildIndex(content, {
+        includeHistory,
+        historyDocs,
+      });
 
       const stats = ragService.getStats();
       setRagStats(stats);
@@ -133,6 +173,8 @@ const TiptapEditor = () => {
             <div style={{ fontSize: 12, marginTop: 4 }}>
               共 {stats.totalChunks} 个语义块，覆盖 {stats.chapters.length}{' '}
               个章节
+              {historyDocs.length > 0 &&
+                ` (含 ${historyDocs.length} 篇历史文章)`}
             </div>
           </div>
         ),
@@ -312,84 +354,211 @@ const TiptapEditor = () => {
 
             {/* 🔥 测试文档加载按钮 */}
             <Dropdown
-              menu={{
-                items: [
-                  {
-                    key: 'build-rag',
-                    label: ragReady ? '✅ RAG已就绪' : '🔧 构建RAG索引',
-                    icon: <DatabaseOutlined />,
-                    onClick: handleBuildRAG,
-                    disabled: ragLoading,
-                  },
-                  {
-                    key: 'rebuild-rag',
-                    label: '🔄 重建索引',
-                    icon: <DatabaseOutlined />,
-                    onClick: handleRebuildRAG,
-                    disabled: !ragReady || ragLoading,
-                  },
-                  {
-                    key: 'rag-stats',
-                    label: ragStats
-                      ? `📊 ${ragStats.totalChunks}块 / ${ragStats.chapters.length}章节`
-                      : '📊 查看统计',
-                    disabled: !ragReady,
-                    onClick: () => {
-                      if (ragStats) {
-                        message.info({
-                          content: (
-                            <div>
-                              <div>📊 RAG索引统计</div>
-                              <div style={{ fontSize: 12, marginTop: 8 }}>
-                                <div>• 语义块数：{ragStats.totalChunks}</div>
-                                <div>• 章节数：{ragStats.chapters.length}</div>
-                                <div>
-                                  • 平均块大小：{ragStats.averageChunkSize}字
+              dropdownRender={() => (
+                <div
+                  style={{
+                    background: '#fff',
+                    borderRadius: 8,
+                    boxShadow:
+                      '0 3px 6px -4px rgba(0,0,0,.12), 0 6px 16px 0 rgba(0,0,0,.08)',
+                    padding: 8,
+                    minWidth: 280,
+                  }}
+                >
+                  {/* 🆕 历史文档选择 */}
+                  <Card
+                    size="small"
+                    title="📚 历史文档参考"
+                    style={{ marginBottom: 8 }}
+                    bodyStyle={{ padding: 12 }}
+                  >
+                    <Space direction="vertical" style={{ width: '100%' }}>
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                        }}
+                      >
+                        <span style={{ fontSize: 13 }}>包含历史文章</span>
+                        <Switch
+                          size="small"
+                          checked={includeHistory}
+                          onChange={setIncludeHistory}
+                        />
+                      </div>
+
+                      {includeHistory && (
+                        <Select
+                          mode="multiple"
+                          size="small"
+                          style={{ width: '100%' }}
+                          placeholder="选择相关文章"
+                          value={selectedArticles}
+                          onChange={setSelectedArticles}
+                          maxTagCount={2}
+                          options={userArticles.map((a) => ({
+                            label: a.title,
+                            value: a.id,
+                          }))}
+                        />
+                      )}
+
+                      {includeHistory && selectedArticles.length > 0 && (
+                        <div style={{ fontSize: 12, color: '#666' }}>
+                          💡 适用于系列文章或需要参考历史内容的场景
+                        </div>
+                      )}
+                    </Space>
+                  </Card>
+
+                  {/* 原有菜单项 */}
+                  <div
+                    style={{ borderTop: '1px solid #f0f0f0', paddingTop: 8 }}
+                  >
+                    <Button
+                      type="text"
+                      block
+                      icon={<DatabaseOutlined />}
+                      onClick={handleBuildRAG}
+                      disabled={ragLoading}
+                      style={{
+                        textAlign: 'left',
+                        justifyContent: 'flex-start',
+                      }}
+                    >
+                      {ragReady ? '✅ RAG已就绪' : '🔧 构建RAG索引'}
+                    </Button>
+
+                    <Button
+                      type="text"
+                      block
+                      icon={<DatabaseOutlined />}
+                      onClick={handleRebuildRAG}
+                      disabled={!ragReady || ragLoading}
+                      style={{
+                        textAlign: 'left',
+                        justifyContent: 'flex-start',
+                      }}
+                    >
+                      🔄 重建索引
+                    </Button>
+
+                    <Button
+                      type="text"
+                      block
+                      disabled={!ragReady}
+                      onClick={() => {
+                        if (ragStats) {
+                          message.info({
+                            content: (
+                              <div>
+                                <div>📊 RAG索引统计</div>
+                                <div style={{ fontSize: 12, marginTop: 8 }}>
+                                  <div>• 语义块数：{ragStats.totalChunks}</div>
+                                  <div>
+                                    • 章节数：{ragStats.chapters.length}
+                                  </div>
+                                  <div>
+                                    • 平均块大小：{ragStats.averageChunkSize}字
+                                  </div>
+                                  <div>• 缓存命中：{ragStats.cacheSize}次</div>
                                 </div>
-                                <div>• 缓存命中：{ragStats.cacheSize}次</div>
                               </div>
-                            </div>
-                          ),
-                          duration: 5,
-                        });
-                      }
-                    },
-                  },
-                  { type: 'divider' },
-                  {
-                    key: 'small',
-                    label: '小文档 (3K字)',
-                    icon: <ExperimentOutlined />,
-                    onClick: () => loadTestDocument('small'),
-                  },
-                  {
-                    key: 'medium',
-                    label: '中等文档 (1万字)',
-                    icon: <ExperimentOutlined />,
-                    onClick: () => loadTestDocument('medium'),
-                  },
-                  {
-                    key: 'large',
-                    label: '大文档 (5万字)',
-                    icon: <ExperimentOutlined />,
-                    onClick: () => loadTestDocument('large'),
-                  },
-                  { type: 'divider' },
-                  {
-                    key: 'monitor',
-                    label: showPerformanceMonitor
-                      ? '关闭性能监控'
-                      : '打开性能监控',
-                    icon: <DashboardOutlined />,
-                    onClick: () => setShowPerformanceMonitor((prev) => !prev),
-                  },
-                ],
-              }}
+                            ),
+                            duration: 5,
+                          });
+                        }
+                      }}
+                      style={{
+                        textAlign: 'left',
+                        justifyContent: 'flex-start',
+                      }}
+                    >
+                      {ragStats
+                        ? `📊 ${ragStats.totalChunks}块 / ${ragStats.chapters.length}章节`
+                        : '📊 查看统计'}
+                    </Button>
+                  </div>
+
+                  <div
+                    style={{
+                      borderTop: '1px solid #f0f0f0',
+                      paddingTop: 8,
+                      marginTop: 8,
+                    }}
+                  >
+                    <div
+                      style={{
+                        padding: '4px 12px',
+                        fontSize: 12,
+                        color: '#999',
+                      }}
+                    >
+                      测试文档
+                    </div>
+                    <Button
+                      type="text"
+                      block
+                      icon={<ExperimentOutlined />}
+                      onClick={() => loadTestDocument('small')}
+                      style={{
+                        textAlign: 'left',
+                        justifyContent: 'flex-start',
+                      }}
+                    >
+                      小文档 (3K字)
+                    </Button>
+                    <Button
+                      type="text"
+                      block
+                      icon={<ExperimentOutlined />}
+                      onClick={() => loadTestDocument('medium')}
+                      style={{
+                        textAlign: 'left',
+                        justifyContent: 'flex-start',
+                      }}
+                    >
+                      中等文档 (1万字)
+                    </Button>
+                    <Button
+                      type="text"
+                      block
+                      icon={<ExperimentOutlined />}
+                      onClick={() => loadTestDocument('large')}
+                      style={{
+                        textAlign: 'left',
+                        justifyContent: 'flex-start',
+                      }}
+                    >
+                      大文档 (5万字)
+                    </Button>
+                  </div>
+
+                  <div
+                    style={{
+                      borderTop: '1px solid #f0f0f0',
+                      paddingTop: 8,
+                      marginTop: 8,
+                    }}
+                  >
+                    <Button
+                      type="text"
+                      block
+                      icon={<DashboardOutlined />}
+                      onClick={() => setShowPerformanceMonitor((prev) => !prev)}
+                      style={{
+                        textAlign: 'left',
+                        justifyContent: 'flex-start',
+                      }}
+                    >
+                      {showPerformanceMonitor ? '关闭性能监控' : '打开性能监控'}
+                    </Button>
+                  </div>
+                </div>
+              )}
               placement="bottomRight"
             >
-              {/* <Button type="text" icon={<ExperimentOutlined />}>
-                测试工具
-              </Button> */}
               <Button
                 type="text"
                 icon={<ExperimentOutlined />}
